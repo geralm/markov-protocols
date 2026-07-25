@@ -1,0 +1,64 @@
+[project]
+name = "markov-protocols"
+version = "0.1.0"
+description = "A deterministic finite state machine for modeling workflows that guide AI agents."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "gera", email = "estebanlm852002@hotmail.com" }
+]
+keywords = [
+    "finite-state-machine",
+    "fsm",
+    "workflow",
+    "state-machine",
+    "ai-agent",
+    "llm",
+    "deterministic",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.13.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/geralm/markov-protocols"
+Repository = "https://github.com/geralm/markov-protocols"
+Issues = "https://github.com/geralm/markov-protocols/issues"
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+strict = true
+files = ["src"]
