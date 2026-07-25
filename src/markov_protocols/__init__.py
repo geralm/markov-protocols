@@ -42,6 +42,16 @@ from .runtime.events import (
     ValueSet,
 )
 from .runtime.session import Session, UpdateResult
+from .serialization import (
+    export_to_dict,
+    export_to_file,
+    from_json,
+    from_yaml,
+    import_from_dict,
+    import_from_file,
+    to_json,
+    to_yaml,
+)
 from .slug import slugify
 
 __all__ = [
@@ -84,8 +94,16 @@ __all__ = [
     "Workflow",
     "condition_fields",
     "evaluate",
+    "export_to_dict",
+    "export_to_file",
+    "from_json",
+    "from_yaml",
+    "import_from_dict",
+    "import_from_file",
     "referenced_fields",
     "resolve",
     "slugify",
     "state_registry",
+    "to_json",
+    "to_yaml",
 ]

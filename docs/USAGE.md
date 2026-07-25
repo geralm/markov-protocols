@@ -180,6 +180,52 @@ resumed = Session.resume(workflow, **saved)
 
 ---
 
+## 7b. Import & export (JSON / YAML)
+
+Author a workflow as data and load it, or save a built one to disk. Imports are
+validated through `Workflow.compile()`, so they return a `Result` — a bad document
+is a friendly failure, never a crash.
+
+```python
+from markov_protocols import to_json, from_json, to_yaml, from_yaml, export_to_file, import_from_file
+
+text = to_yaml(workflow)                 # workflow -> YAML string
+result = from_yaml(text)                 # YAML string -> Result[Workflow]
+if result.is_success:
+    workflow = result.value
+
+export_to_file(workflow, "flow.json")    # format chosen by extension (.json/.yaml/.yml)
+loaded = import_from_file("flow.yaml")   # -> Result[Workflow]
+```
+
+A document is easy to hand-write — `type` + `title` + the state's own fields; everything
+else defaults:
+
+```yaml
+name: real-estate-intake
+initial: Collect email                       # a title or a slug; both work
+states:
+  - type: DATA_COLLECTION
+    title: Collect email
+    requires:
+      - field: email
+      - field: budget
+        condition: { op: gte, field: budget, value: 1000 }
+  - type: ACTION_EXECUTE
+    title: Send confirmation
+    result_field: confirmation_sent
+    payload:
+      to: { type: ref, field: email }        # a Ref
+transitions:
+  - source_id: collect-email
+    target_id: send-confirmation
+    guard: { op: eq, field: intent, value: buy }   # optional
+```
+
+YAML support needs the optional extra: `pip install 'markov-protocols[yaml]'` (JSON needs
+nothing). To add another format, implement `IDocumentConverter` (methods `to_document` /
+`from_document`) and give it two facade functions — see `serialization/`.
+
 ## 8. Conditions & guards
 
 Conditions are a small, typed, JSON-serializable vocabulary evaluated over the Blackboard. Use them
