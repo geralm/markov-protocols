@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import SerializeAsAny, field_validator
 
 from ..base import StrictModel
+from ..renderable import Renderable
 from ..result import ErrorType, Result
 from ..slug import slugify
 from .registry import state_registry
@@ -21,7 +22,7 @@ from .state import State
 from .transition import Transition
 
 
-class Workflow(StrictModel):
+class Workflow(StrictModel, Renderable):
     """An immutable, validated workflow definition."""
 
     name: str
@@ -99,3 +100,21 @@ class Workflow(StrictModel):
         """
         matches = [t for t in self.transitions if t.source_id == source_id]
         return sorted(matches, key=lambda t: -t.priority)
+
+    def to_llm_extended(self) -> str:
+        """The workflow's structure as facts — steps in order, then transitions."""
+        lines = [f"Workflow: {self.name}", "Steps:"]
+        for index, state in enumerate(self.states, start=1):
+            lines.append(f"{index}. {state.title}")
+        if self.transitions:
+            lines.append("Transitions:")
+            lines.extend(f"- {self._edge_text(t)}" for t in self.transitions)
+        return "\n".join(lines)
+
+    def _edge_text(self, transition: Transition) -> str:
+        source = self.state(transition.source_id)
+        target = self.state(transition.target_id)
+        source_title = source.title if source else transition.source_id
+        target_title = target.title if target else transition.target_id
+        text = f"{source_title} -> {target_title}"
+        return f"{text} (conditional)" if transition.guard is not None else text

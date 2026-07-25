@@ -15,6 +15,11 @@ Slices 1–3 complete — the engine is functionally whole:
 - **Integrity** — a correction (`ValueChanged`) reopens the states that depend on it, strict-rewinds
   to the earliest one, clears reopened actions' outputs so they re-run, and flags `had_executed`
   for host compensation. All derived from `history` — no parallel bookkeeping.
+- **Blockers & rendering** — every state explains *why* it hasn't advanced via `blockers`
+  (`MISSING` / `INVALID` / `AWAITING_*`); requirements take `description` + `options` (enum with
+  per-value descriptions); components render to safe, factual prompt text via `Renderable`.
+- **Serialization** — import/export workflows as JSON or YAML (`to_json`/`from_json`/…), validated
+  through `compile()`.
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the full architecture and build plan.
 

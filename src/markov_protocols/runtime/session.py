@@ -19,11 +19,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..conditions.evaluate import condition_fields, evaluate
-from ..conditions.models import Exists
+from ..conditions.evaluate import evaluate
+from ..definition.blocker import Blocker, BlockReason
 from ..definition.state import Directive, State, Status
 from ..definition.transition import Transition
 from ..definition.workflow import Workflow
+from ..renderable import Renderable
 from ..result import Result
 from .blackboard import Blackboard
 from .events import (
@@ -37,15 +38,53 @@ from .events import (
 
 
 @dataclass(frozen=True)
-class UpdateResult:
-    """What one ``update()`` produced — the agent's deterministic snapshot."""
+class UpdateResult(Renderable):
+    """What one ``update()`` produced — the agent's deterministic snapshot.
+
+    ``blockers`` is the single source of truth for *why* the current state has not
+    advanced; ``missing_fields`` / ``invalid_fields`` / ``awaiting`` are convenience
+    views derived from it.
+    """
 
     current_state: State
-    missing_fields: list[str]
+    blockers: list[Blocker]
     available_transitions: list[Transition]
     directive: Directive | None
     events: list[Event]
     is_finished: bool
+
+    @property
+    def missing_fields(self) -> list[str]:
+        """Required fields that are absent."""
+        return [b.field for b in self.blockers if b.reason is BlockReason.MISSING and b.field]
+
+    @property
+    def invalid_fields(self) -> list[str]:
+        """Fields that are present but fail their rule."""
+        return [b.field for b in self.blockers if b.reason is BlockReason.INVALID and b.field]
+
+    @property
+    def awaiting(self) -> list[str]:
+        """Fields the step is waiting on a host action or a human to produce."""
+        awaiting_reasons = (BlockReason.AWAITING_RESULT, BlockReason.AWAITING_HUMAN)
+        return [b.field for b in self.blockers if b.reason in awaiting_reasons and b.field]
+
+    def to_llm_extended(self) -> str:
+        parts = [self.current_state.to_llm_extended()]
+        if self.blockers:
+            parts.append("Blocked by:")
+            parts.extend(f"- {b.to_llm_extended()}" for b in self.blockers)
+        elif self.is_finished:
+            parts.append("This step is complete.")
+        return "\n".join(parts)
+
+    def to_markdown(self) -> str:
+        lines = [f"## {self.current_state.title}", "", self.current_state.to_llm_extended()]
+        if self.blockers:
+            lines += ["", "**Blocked by:**", *(f"- {b.to_llm_extended()}" for b in self.blockers)]
+        elif self.is_finished:
+            lines += ["", "_Step complete._"]
+        return "\n".join(lines)
 
 
 class Session:
@@ -302,22 +341,12 @@ class Session:
             return True
         return evaluate(transition.guard, self._blackboard)
 
-    def _missing_fields(self, state: State) -> list[str]:
-        """Fields the state's completion mentions that are still absent."""
-        mentioned = condition_fields(state.completion_condition())
-        absent = [field for field in mentioned if not self._has_value(field)]
-        return sorted(absent)
-
-    def _has_value(self, field: str) -> bool:
-        """Is ``field`` present and non-null on the blackboard?"""
-        return evaluate(Exists(field=field), self._blackboard)
-
     def _snapshot(self, events: list[Event]) -> UpdateResult:
         """Assemble the return value describing where the session now stands."""
         current = self.current_state
         return UpdateResult(
             current_state=current,
-            missing_fields=self._missing_fields(current),
+            blockers=current.blockers(self._blackboard),
             available_transitions=self._enabled_transitions(self._current_id),
             directive=current.directive(self._blackboard),
             events=events,

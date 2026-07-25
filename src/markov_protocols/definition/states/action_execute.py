@@ -9,7 +9,8 @@ from pydantic import Field, field_validator
 
 from ...conditions.models import Condition, Exists
 from ...references import normalize_refs, referenced_fields, resolve
-from ..state import Directive, State
+from ..blocker import Blocker, BlockReason
+from ..state import Directive, State, field_present
 
 
 class ActionExecuteState(State):
@@ -46,3 +47,31 @@ class ActionExecuteState(State):
             payload = cast(dict[str, Any], resolved.value)
             return Directive(kind="action", ready=True, payload=payload)
         return Directive(kind="action", ready=False, missing=resolved.error_details or [])
+
+    def blockers(self, data: Mapping[str, Any]) -> list[Blocker]:
+        # Can't even run the action until its payload references are available.
+        unresolved = sorted(
+            f for f in referenced_fields(self.payload) if not field_present(data, f)
+        )
+        if unresolved:
+            return [
+                Blocker(
+                    reason=BlockReason.MISSING,
+                    field=f,
+                    detail=f"'{f}' is needed to run '{self.title}'",
+                )
+                for f in unresolved
+            ]
+        # Payload is ready — now waiting for the host to run it and report back.
+        if not field_present(data, self.result_field):
+            return [
+                Blocker(
+                    reason=BlockReason.AWAITING_RESULT,
+                    field=self.result_field,
+                    detail=f"waiting for the result of '{self.title}'",
+                )
+            ]
+        return []
+
+    def to_llm_extended(self) -> str:
+        return f"Step: {self.title} (action)\n- awaiting result in '{self.result_field}'"

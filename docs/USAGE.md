@@ -97,11 +97,27 @@ states (handy when the user answers everything at once), or hold position when t
 | Field | Meaning |
 |---|---|
 | `current_state` | the state the workflow now sits on — read `current_state.metadata.prompts` to guide your agent |
-| `missing_fields` | data the current state is still waiting for |
+| `blockers` | why the current state hasn't advanced (see below) |
+| `missing_fields` / `invalid_fields` / `awaiting` | convenience views derived from `blockers` |
 | `available_transitions` | transitions that could fire next |
 | `directive` | the host action to run now (see below), or `None` |
 | `events` | what happened during this call |
 | `is_finished` | the workflow reached a terminal state |
+
+### Blockers — why the step hasn't advanced
+
+`blockers` is a list of typed reasons the current state is stuck; the convenience views derive from it:
+
+```python
+outcome = session.update({"intent": "rent"}).value
+outcome.missing_fields   # [] — a required field is absent
+outcome.invalid_fields   # ["intent"] — present but fails its rule
+outcome.awaiting         # [] — waiting on a host action / human
+for b in outcome.blockers:
+    print(b.reason, b.field, b.detail)   # BlockReason.INVALID intent "'intent' is invalid: 'rent' …"
+```
+
+`Blocker.reason` is `MISSING`, `INVALID`, `AWAITING_RESULT`, or `AWAITING_HUMAN`.
 
 ### Directives (host actions)
 
@@ -247,6 +263,38 @@ All(of=[Exists(field="email"), Gt(field="budget", value=1000)])
 
 Available: `Exists`, `Eq`, `Ne`, `In`, `Regex`, `Gt`, `Gte`, `Lt`, `Lte`, and the combinators
 `All`, `Any`, `Not`. A condition over a missing field is always `False` and never raises.
+
+### Enums (allowed values) with descriptions
+
+For a fixed set of choices, use `options` on the requirement — it auto-enforces the set (compiles to
+`In`) and carries a description per value for the agent:
+
+```python
+Requirement(
+    field="intent",
+    description="what the customer wants",
+    options=[
+        Option(value="buy", description="wants to purchase"),
+        Option(value="support", description="needs help"),
+    ],
+)
+```
+
+A disallowed value won't complete the step and shows up as an `INVALID` blocker (not `MISSING`).
+`DataCollectionState.field_options()` returns each field's `description`, `options`, and any `pattern`
+so the agent can present the choices.
+
+## 8b. Rendering to text for the LLM (`Renderable`)
+
+`Blocker`, `State`, `UpdateResult`, `Directive`, and `Workflow` implement `Renderable` —
+`to_llm_extended()` and `to_markdown()` produce **safe, factual text** ready to concatenate into a
+prompt (field names, descriptions, allowed values, blocker reasons, structure). They never include
+`metadata.prompts` or instructions — facts only, deterministic.
+
+```python
+brief = session.update(values).value.to_llm_extended()   # a factual situational brief
+menu  = workflow.to_llm_extended()                        # the steps in order + transitions
+```
 
 ---
 

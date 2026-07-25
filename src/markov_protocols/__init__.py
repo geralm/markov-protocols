@@ -23,13 +23,15 @@ from .conditions import (
     condition_fields,
     evaluate,
 )
+from .definition.blocker import Blocker, BlockReason
 from .definition.metadata import StateMetadata, TransitionMetadata
 from .definition.registry import state_registry
-from .definition.state import Directive, Requirement, State, Status
+from .definition.state import Directive, Option, Requirement, State, Status
 from .definition.states import ActionExecuteState, DataCollectionState, HumanHandoffState
 from .definition.transition import Transition
 from .definition.workflow import Workflow
 from .references import Ref, referenced_fields, resolve
+from .renderable import Renderable
 from .result import ErrorType, Result
 from .runtime.blackboard import Blackboard
 from .runtime.events import (
@@ -60,6 +62,8 @@ __all__ = [
     "All",
     "Any",
     "Blackboard",
+    "BlockReason",
+    "Blocker",
     "Condition",
     "DataCollectionState",
     "Directive",
@@ -75,8 +79,10 @@ __all__ = [
     "Lte",
     "Ne",
     "Not",
+    "Option",
     "Ref",
     "Regex",
+    "Renderable",
     "Requirement",
     "Result",
     "Session",

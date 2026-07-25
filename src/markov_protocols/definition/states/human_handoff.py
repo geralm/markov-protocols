@@ -9,7 +9,8 @@ from pydantic import Field, field_validator
 
 from ...conditions.models import Condition, Exists
 from ...references import normalize_refs, referenced_fields, resolve
-from ..state import Directive, State
+from ..blocker import Blocker, BlockReason
+from ..state import Directive, State, field_present
 
 
 class HumanHandoffState(State):
@@ -44,3 +45,29 @@ class HumanHandoffState(State):
             payload = cast(dict[str, Any], resolved.value)
             return Directive(kind="handoff", ready=True, payload=payload)
         return Directive(kind="handoff", ready=False, missing=resolved.error_details or [])
+
+    def blockers(self, data: Mapping[str, Any]) -> list[Blocker]:
+        unresolved = sorted(
+            f for f in referenced_fields(self.notify) if not field_present(data, f)
+        )
+        if unresolved:
+            return [
+                Blocker(
+                    reason=BlockReason.MISSING,
+                    field=f,
+                    detail=f"'{f}' is needed to notify for '{self.title}'",
+                )
+                for f in unresolved
+            ]
+        if not field_present(data, self.resolution_field):
+            return [
+                Blocker(
+                    reason=BlockReason.AWAITING_HUMAN,
+                    field=self.resolution_field,
+                    detail=f"waiting for a human to resolve '{self.title}'",
+                )
+            ]
+        return []
+
+    def to_llm_extended(self) -> str:
+        return f"Step: {self.title} (handoff)\n- awaiting resolution in '{self.resolution_field}'"

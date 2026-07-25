@@ -1,18 +1,19 @@
 """The ``State`` interface — the extension seam of the whole engine.
 
 Every step in a workflow is a ``State``. The engine never branches on a state's
-concrete type; it only ever asks two questions through this interface:
+concrete type; it only ever asks through this interface:
 
 * ``completion_condition()`` — the ``Condition`` that, when true over the
   Blackboard, means this step is done.
 * ``depends_on()`` — the Blackboard fields whose change should reopen this step.
+* ``blockers()`` — why the step has not completed yet (missing/invalid/awaiting).
 
-Adding a new kind of state (here or in a downstream project) means implementing
-these two methods and registering the type — with zero changes to the engine.
+Adding a new kind of state (here or downstream) means implementing these and
+registering the type — with zero changes to the engine.
 
-Note the two levels: a ``Requirement`` is an authoring input (a needed field with
-an optional extra rule); ``completion_condition()`` compiles those into the single
-evaluable ``Condition`` the engine checks.
+Note the two levels: a ``Requirement`` is an authoring input (a needed field, its
+allowed ``options``, an optional rule); ``completion_condition()`` compiles those
+into the single evaluable ``Condition`` the engine checks.
 """
 
 from __future__ import annotations
@@ -25,8 +26,11 @@ from typing import Any
 from pydantic import Field
 
 from ..base import StrictModel
-from ..conditions.models import All, Condition, Exists
+from ..conditions.evaluate import condition_fields, evaluate
+from ..conditions.models import All, Condition, Exists, In
+from ..renderable import Renderable
 from ..slug import slugify
+from .blocker import Blocker, BlockReason
 from .metadata import StateMetadata
 
 
@@ -39,7 +43,7 @@ class Status(StrEnum):
     REOPENED = "REOPENED"  # was completed, then data it depends on changed
 
 
-class Directive(StrictModel):
+class Directive(StrictModel, Renderable):
     """The host-actionable instruction a state surfaces while it is active.
 
     The machine never acts; it hands the host a fully-resolved ``payload`` to
@@ -52,15 +56,63 @@ class Directive(StrictModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     missing: list[str] = Field(default_factory=list)
 
+    def to_llm_extended(self) -> str:
+        if self.ready:
+            return f"Ready to run '{self.kind}'."
+        if self.missing:
+            return f"Cannot run '{self.kind}' yet — missing: {', '.join(self.missing)}."
+        return f"Action '{self.kind}' is not ready."
+
+
+class Option(StrictModel):
+    """An allowed value for a field, with an optional description for the agent."""
+
+    value: Any
+    description: str | None = None
+
 
 class Requirement(StrictModel):
-    """A field a data-collection state needs, with an optional extra condition."""
+    """A field a data-collection state needs.
+
+    ``options`` fixes the allowed values (and auto-compiles to an ``In`` rule);
+    ``condition`` adds any further rule; ``description`` explains the field to the
+    agent. All are optional beyond ``field``.
+    """
 
     field: str
+    description: str | None = None
+    options: list[Option] = Field(default_factory=list)
     condition: Condition | None = None
 
 
-class State(StrictModel, ABC):
+def field_present(data: Mapping[str, Any], field: str) -> bool:
+    """Whether a field is present and non-null on the data."""
+    return evaluate(Exists(field=field), data)
+
+
+def all_of(conditions: list[Condition]) -> Condition:
+    """Combine conditions with AND. A lone condition is returned unwrapped."""
+    if len(conditions) == 1:
+        return conditions[0]
+    return All(of=conditions)
+
+
+def requirement_constraints(requirement: Requirement) -> list[Condition]:
+    """The value rules on a requirement, excluding mere existence."""
+    parts: list[Condition] = []
+    if requirement.options:
+        parts.append(In(field=requirement.field, value=[o.value for o in requirement.options]))
+    if requirement.condition is not None:
+        parts.append(requirement.condition)
+    return parts
+
+
+def requirement_condition(requirement: Requirement) -> Condition:
+    """A requirement holds when its field exists and satisfies its value rules."""
+    return all_of([Exists(field=requirement.field), *requirement_constraints(requirement)])
+
+
+class State(StrictModel, Renderable, ABC):
     """A single step. ``id`` is derived from ``title`` and is never stored."""
 
     title: str
@@ -97,17 +149,29 @@ class State(StrictModel, ABC):
         """
         return None
 
+    def blockers(self, data: Mapping[str, Any]) -> list[Blocker]:
+        """Why this state has not completed. Empty when it has.
 
-def all_of(conditions: list[Condition]) -> Condition:
-    """Combine conditions with AND. A lone condition is returned unwrapped."""
-    if len(conditions) == 1:
-        return conditions[0]
-    return All(of=conditions)
+        Generic default: report the referenced fields that are absent. Subtypes
+        refine this into precise missing / invalid / awaiting reasons.
+        """
+        if evaluate(self.completion_condition(), data):
+            return []
+        absent = sorted(
+            f for f in condition_fields(self.completion_condition()) if not field_present(data, f)
+        )
+        if absent:
+            return [
+                Blocker(reason=BlockReason.MISSING, field=f, detail=f"'{f}' is required")
+                for f in absent
+            ]
+        return [
+            Blocker(
+                reason=BlockReason.INVALID,
+                field=None,
+                detail=f"the data does not satisfy step '{self.title}'",
+            )
+        ]
 
-
-def requirement_condition(requirement: Requirement) -> Condition:
-    """A requirement holds when its field exists and its condition (if any) holds."""
-    exists: Condition = Exists(field=requirement.field)
-    if requirement.condition is None:
-        return exists
-    return All(of=[exists, requirement.condition])
+    def to_llm_extended(self) -> str:
+        return f"Step: {self.title}"
