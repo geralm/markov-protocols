@@ -1,56 +1,172 @@
 # markov-protocols
 
-A Finite State Machine capable of modeling workflows to provide guidance to an AI agent with determinism.
+**A deterministic finite state machine for modeling workflows that guide AI agents.**
 
-A standalone Python module providing the state-machine mechanism, meant to be reused across other Python projects.
+LLMs are stochastic. When a workflow must happen *reliably* — collect these fields, validate them,
+call that action, handle a correction — prompting alone drifts and hallucinates. `markov-protocols`
+is the **deterministic referee**: you model the workflow as a state machine, the agent reads the
+current step for guidance and reports what it learned, and the machine decides — deterministically —
+what happens next. It never calls an LLM, runs a tool, or performs I/O; your host does that.
 
-## Status
+- **Deterministic**: same definition + same collected data → same decision, every time.
+- **Correction-aware**: if the customer changes their mind, the machine rewinds and re-runs only
+  what's affected (and tells you if a side effect must be compensated).
+- **Typed & serializable**: author in Python or as JSON/YAML; validated, `mypy`-clean, `py.typed`.
 
-Slices 1–3 complete — the engine is functionally whole:
+## Install
 
-- **Definition** — conditions, references, metadata, the `State` interface with three concrete state
-  types, transitions, the registry, and `Workflow.compile()`.
-- **Runtime** — `Blackboard`, the `Event` history, `Directive` materialization, and
-  `Session.start/update` with the write + fast-forward passes.
-- **Integrity** — a correction (`ValueChanged`) reopens the states that depend on it, strict-rewinds
-  to the earliest one, clears reopened actions' outputs so they re-run, and flags `had_executed`
-  for host compensation. All derived from `history` — no parallel bookkeeping.
-- **Blockers & rendering** — every state explains *why* it hasn't advanced via `blockers`
-  (`MISSING` / `INVALID` / `AWAITING_*`); requirements take `description` + `options` (enum with
-  per-value descriptions); components render to safe, factual prompt text via `Renderable`.
-- **Serialization** — import/export workflows as JSON or YAML (`to_json`/`from_json`/…), validated
-  through `compile()`.
+```bash
+pip install markov-protocols
+pip install "markov-protocols[yaml]"   # optional: YAML import/export
+```
 
-See [`docs/DESIGN.md`](docs/DESIGN.md) for the full architecture and build plan.
+Requires Python 3.13+.
+
+## Quickstart
+
+```python
+from markov_protocols import (
+    Workflow, DataCollectionState, ActionExecuteState,
+    Requirement, Ref, Transition, Session,
+)
+
+# 1. Define the workflow (plain data).
+workflow = Workflow.compile(
+    name="intake",
+    initial="Collect email",
+    states=[
+        DataCollectionState(
+            title="Collect email",
+            requires=[Requirement(field="email", description="the customer's email")],
+        ),
+        ActionExecuteState(
+            title="Send confirmation",
+            payload={"to": Ref(field="email")},   # a Ref, filled from collected data
+            result_field="confirmation_sent",
+        ),
+    ],
+    transitions=[
+        Transition(source_id="collect-email", target_id="send-confirmation"),
+    ],
+).value  # compile() returns a Result; .value is the validated Workflow
+
+# 2. Run it. Feed in whatever your agent extracted from the conversation.
+session = Session.start(workflow)
+
+outcome = session.update({"email": "pedro@example.com"}).value
+print(outcome.current_state.id)      # 'send-confirmation'  (advanced automatically)
+print(outcome.directive.payload)     # {'to': 'pedro@example.com'}  (resolved, ready to run)
+
+# 3. Your host runs the action and reports the result back.
+session.update({"confirmation_sent": True})
+print(session.is_finished)           # True
+```
+
+`update()` is the single input verb: it records the data, then **fast-forwards** through every step
+the data already satisfies — so one call can advance several steps, or hold position when it can't.
+
+## Your agent loop
+
+The machine is the deterministic referee; your host owns everything stochastic or side-effectful:
+
+```python
+session = Session.start(workflow)
+while not session.is_finished:
+    values  = my_llm.extract(conversation, session.current_state)   # your LLM (stochastic)
+    outcome = session.update(values).value                          # the machine (deterministic)
+
+    directive = outcome.directive
+    if directive and directive.ready:                               # a side effect to run
+        result = my_host.run(directive.payload)                     # your webhook / function
+        session.update({session.current_state.result_field: result})
+```
+
+## Guidance & validation
+
+Constrain values with `options` (an enum with per-value descriptions) or any `Condition`. When a
+step can't advance, `blockers` tells you *why* — and the convenience views split it apart:
+
+```python
+from markov_protocols import DataCollectionState, Requirement, Option, Workflow, Session
+
+triage = Workflow.compile(
+    name="triage",
+    initial="Detect intent",
+    states=[DataCollectionState(
+        title="Detect intent",
+        requires=[Requirement(
+            field="intent",
+            description="what the customer wants",
+            options=[Option(value="buy", description="wants to purchase"),
+                     Option(value="support", description="needs help")],
+        )],
+    )],
+).value
+
+outcome = Session.start(triage).update({"intent": "rent"}).value
+print(outcome.missing_fields)          # []           — the field IS present...
+print(outcome.invalid_fields)          # ['intent']   — ...but 'rent' isn't allowed
+print(outcome.to_llm_extended())       # factual, prompt-ready text (no business prompts, facts only):
+# Step: Detect intent
+# - intent: what the customer wants (one of: buy (wants to purchase), support (needs help))
+# Blocked by:
+# - 'intent' is invalid: 'rent' is not allowed; choose one of: buy (wants to purchase), support (needs help)
+```
+
+Branch on a value with a transition **guard**: `Transition(source_id=..., target_id=..., guard=Eq(field="intent", value="buy"))`.
+
+## Save & load (JSON / YAML)
+
+```python
+from markov_protocols import to_yaml, from_yaml, export_to_file, import_from_file
+
+text   = to_yaml(workflow)            # -> YAML string
+result = from_yaml(text)              # -> Result[Workflow]  (validated; a bad doc fails, never crashes)
+
+export_to_file(workflow, "flow.json") # format from the extension (.json/.yaml/.yml)
+loaded = import_from_file("flow.yaml")
+```
+
+A workflow document is easy to hand-author — `type` + `title` + the state's own fields:
+
+```yaml
+name: intake
+initial: Collect email
+states:
+  - type: DATA_COLLECTION
+    title: Collect email
+    requires:
+      - field: email
+transitions: []
+```
+
+## Concepts
+
+| Term | What it is |
+|---|---|
+| **Workflow** | the authored graph of states + transitions (`Workflow.compile()` validates it) |
+| **State** | a step — `DataCollectionState`, `ActionExecuteState`, `HumanHandoffState`, or your own |
+| **Transition** | a directed link, optionally guarded by a `Condition` (branching) |
+| **Session** | one conversation's live run; drive it with `session.update(values)` |
+| **Blackboard** | the shared, deterministic record of collected values |
+| **Directive** | a fully-resolved instruction for your host to execute (never run by the machine) |
+| **Blocker** | why the current step hasn't advanced: `MISSING` / `INVALID` / `AWAITING_*` |
+
+## Documentation
+
+- [Usage manual](https://github.com/geralm/markov-protocols/blob/main/docs/USAGE.md)
+- [Design & architecture](https://github.com/geralm/markov-protocols/blob/main/docs/DESIGN.md)
+- [Runnable example](https://github.com/geralm/markov-protocols/blob/main/example.py)
 
 ## Development
 
-Managed with [uv](https://docs.astral.sh/uv/).
-
 ```bash
-uv sync            # create the environment and install dev tools
-uv run pytest      # run the test suite
+uv sync            # environment + dev tools
+uv run pytest      # tests
 uv run ruff check  # lint
 uv run mypy        # type-check
 ```
 
-## Layout
+## License
 
-```
-src/markov_protocols/
-    __init__.py        # curated public API
-    result.py          # Result[T, E] / ErrorType — the error-handling pattern
-    base.py            # StrictModel / StrictOpenModel
-    slug.py            # deterministic title -> id
-    conditions/        # the typed boolean vocabulary + pure evaluator
-    references.py      # Ref + resolve + referenced_fields
-    definition/        # metadata, State interface + concrete states, Transition,
-                       #   registry, Workflow.compile()
-    runtime/           # Blackboard, Event history, Session + update() pipeline
-tests/                 # one property-focused module per unit
-```
-
-## Conventions
-
-- Operations return a `Result[T, E]` instead of raising exceptions.
-- Target Python 3.13+.
+MIT
