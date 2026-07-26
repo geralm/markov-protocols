@@ -36,7 +36,7 @@ def build_intake_workflow() -> Workflow:
             ActionExecuteState(
                 title="Send confirmation",
                 payload={"to": Ref(field="email"), "template": "welcome"},
-                result_field="confirmation_sent",
+                requires=[Requirement(field="confirmation_sent")],
             ),
             DataCollectionState(title="Collect budget", requires=[Requirement(field="budget")]),
         ],

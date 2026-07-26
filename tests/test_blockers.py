@@ -79,22 +79,29 @@ def test_regex_invalid_value_is_reported_as_invalid_not_missing() -> None:
     assert result.invalid_fields == ["email"] and result.missing_fields == []
 
 
-def test_action_state_awaits_its_result() -> None:
+def test_action_state_awaits_its_result_while_the_directive_tracks_inputs() -> None:
     state = ActionExecuteState(
-        title="Send", result_field="sent", payload={"to": Ref(field="email")}
+        title="Send", requires=[Requirement(field="sent")], payload={"to": Ref(field="email")}
     )
     workflow = Workflow.compile(name="a", initial="Send", states=[state]).value
     session = _single(workflow)
-    # payload ref missing first -> MISSING
-    assert session.update({}).value.blockers[0].reason is BlockReason.MISSING
-    # ref supplied, now waiting for the host to run it -> AWAITING_RESULT
-    result = session.update({"email": "a@b"}).value
-    assert result.blockers[0].reason is BlockReason.AWAITING_RESULT
-    assert result.awaiting == ["sent"]
+
+    # The state always awaits its own result; the directive reports it can't run
+    # yet because the payload ref (email) is missing.
+    first = session.update({}).value
+    assert first.blockers[0].reason is BlockReason.AWAITING_RESULT
+    assert first.awaiting == ["sent"]
+    assert first.directive is not None and first.directive.ready is False
+    assert first.directive.missing == ["email"]
+
+    # Once the input arrives the directive is ready; still awaiting the result.
+    ready = session.update({"email": "a@b"}).value
+    assert ready.directive is not None and ready.directive.ready is True
+    assert ready.blockers[0].reason is BlockReason.AWAITING_RESULT
 
 
 def test_handoff_awaits_a_human() -> None:
-    state = HumanHandoffState(title="Escalate", resolution_field="resolved")
+    state = HumanHandoffState(title="Escalate", requires=[Requirement(field="resolved")])
     workflow = Workflow.compile(name="h", initial="Escalate", states=[state]).value
     result = _single(workflow).update({}).value
     assert result.blockers[0].reason is BlockReason.AWAITING_HUMAN
@@ -128,7 +135,10 @@ def test_workflow_renders_its_structure_in_order() -> None:
     workflow = Workflow.compile(
         name="flow",
         initial="Detect intent",
-        states=[_intent_state(), ActionExecuteState(title="Do it", result_field="done")],
+        states=[
+            _intent_state(),
+            ActionExecuteState(title="Do it", requires=[Requirement(field="done")]),
+        ],
         transitions=[Transition(source_id="detect-intent", target_id="do-it")],
     ).value
     text = workflow.to_llm_extended()

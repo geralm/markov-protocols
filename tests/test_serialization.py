@@ -31,7 +31,9 @@ def _workflow() -> Workflow:
         states=[
             DataCollectionState(title="Collect email", requires=[Requirement(field="email")]),
             ActionExecuteState(
-                title="Send confirmation", result_field="sent", payload={"to": Ref(field="email")}
+                title="Send confirmation",
+                requires=[Requirement(field="sent")],
+                payload={"to": Ref(field="email")},
             ),
         ],
         transitions=[

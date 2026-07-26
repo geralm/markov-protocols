@@ -140,31 +140,33 @@ class State(StrictModel, ABC):
     def directive(self, bb: Blackboard) -> Directive | None: ...  # host action while active
 ```
 
-Concrete states (each is a small piece; adding one does not touch the engine — §5):
+**Every state declares `requires: list[Requirement]`** (on the base) — the fields that must be
+present/valid to advance. That drives all the shared logic (completion, blockers, `to_pydantic_model`,
+`field_options`, rendering). A concrete type only overrides what makes it distinct: `directive()` (side
+effect), `produces()` (does it output its own `requires`?), `depends_on()` (what it consumes), and the
+blocker reason for an absent field. So the three built-ins are tiny (§5):
 
 ```python
-class DataCollectionState(State):
+class DataCollectionState(State):          # requires filled by the USER
     type: Literal["DATA_COLLECTION"]
-    requires: list[Requirement]
-    # completion()  = All(Exists(f) for each required field)
-    # depends_on()  = the required fields
-    # directive()   = None  (the agent collects, guided by metadata.prompts)
+    # depends_on() = its requires ; produces() = {} ; absent -> MISSING ; directive() = None
 
-class ActionExecuteState(State):
+class ActionExecuteState(State):           # requires PRODUCED by the host running `payload`
     type: Literal["ACTION_EXECUTE"]
-    payload: dict[str, Any]        # literals + Refs
-    result_field: str              # where the host writes the outcome
-    # completion()  = Exists(result_field)
-    # depends_on()  = the Refs inside payload  (its `consumes` set)
-    # directive()   = the payload with every Ref resolved against the Blackboard
+    payload: dict[str, Any]                # literals + Refs (its inputs)
+    # depends_on() = payload refs ; produces() = its requires ; absent -> AWAITING_RESULT ;
+    # directive() = the payload with every Ref resolved
 
-class HumanHandoffState(State):
+class HumanHandoffState(State):            # requires PRODUCED by a human via `notify`
     type: Literal["HUMAN_HANDOFF"]
-    resolution_field: str
-    notify: dict[str, Any]         # literals + Refs
-    # completion()  = Exists(resolution_field)
-    # directive()   = the resolved notification
+    notify: dict[str, Any]                 # literals + Refs
+    # depends_on() = notify refs ; produces() = its requires ; absent -> AWAITING_HUMAN ;
+    # directive() = the resolved notification
 ```
+
+A `Requirement` carries `field`, `required: bool = True`, `type: ValueType`, `options`, `condition`,
+`description`. Optional requirements never gate completion; `to_pydantic_model()` renders the whole set
+(nullable for optional) for LLM structured output and result validation.
 
 ### Transition & Workflow
 
@@ -375,7 +377,7 @@ usable by a downstream project.
   no hashing — the log is the single source of truth. (A fingerprint would only be needed to
   detect changes *across* a resume boundary; add it there if ever required.)
 - **A new `State.produces()` method** names the fields a state *outputs* (an action's
-  `result_field`), distinct from `depends_on()` (its inputs). On reopen those outputs are cleared,
+  `requires`), distinct from `depends_on()` (its inputs). On reopen those outputs are cleared,
   so an action that already ran is forced to re-run with the corrected inputs — and `had_executed`
   is simply "this reopened state produces something", needing no separate bookkeeping.
 

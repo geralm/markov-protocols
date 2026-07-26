@@ -14,7 +14,7 @@ from markov_protocols.definition.registry import StateRegistry
 
 def test_parse_reconstructs_the_concrete_subtype() -> None:
     state = ActionExecuteState(
-        title="Send", result_field="sent", payload={"to": Ref(field="email")}
+        title="Send", requires=[Requirement(field="sent")], payload={"to": Ref(field="email")}
     )
     restored = state_registry.parse(state.model_dump())
     assert type(restored) is ActionExecuteState

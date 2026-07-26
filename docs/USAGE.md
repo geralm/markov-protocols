@@ -51,7 +51,7 @@ result = Workflow.compile(
         ActionExecuteState(
             title="Send confirmation",
             payload={"to": Ref(field="email"), "template": "welcome"},
-            result_field="confirmation_sent",
+            requires=[Requirement(field="confirmation_sent")],   # the result it produces
         ),
         DataCollectionState(title="Collect budget", requires=[Requirement(field="budget")]),
     ],
@@ -68,11 +68,14 @@ workflow = result.value
 
 ### State types
 
-| State | Completes when | Use for |
-|---|---|---|
-| `DataCollectionState(requires=[...])` | every required field exists (and any per-field `condition` holds) | gathering data from the user |
-| `ActionExecuteState(result_field=..., payload={...})` | the host writes `result_field` | a side effect the host runs (webhook, tool, …) |
-| `HumanHandoffState(resolution_field=..., notify={...})` | the host writes `resolution_field` | escalating to a human |
+Every state declares `requires: list[Requirement]` — the fields that must be present (and valid) to
+advance. The types differ only in *who fills those fields* and whether there's a side effect:
+
+| State | `requires` are filled by | Extra | Use for |
+|---|---|---|---|
+| `DataCollectionState` | the user (via your LLM) | — | gathering data from the user |
+| `ActionExecuteState` | the host running `payload` | `payload={...}` | a side effect (webhook, tool, …) |
+| `HumanHandoffState` | a human being notified | `notify={...}` | escalating to a human |
 
 ---
 
@@ -164,14 +167,15 @@ Putting it together, your integration loop looks like:
 ```python
 session = Session.start(workflow)
 while not session.is_finished:
-    values = your_llm.extract(conversation, session.current_state)  # your job (stochastic)
+    schema  = session.current_state.to_pydantic_model()             # structured-output spec
+    values  = your_llm.extract(conversation, schema)                # your job (stochastic)
     outcome = session.update(values).value                          # the machine (deterministic)
 
     if outcome.directive and outcome.directive.ready:
-        result_field, result = your_host.run(outcome.directive.payload)
-        session.update({result_field: result})
+        result = your_host.run(outcome.directive.payload)
+        session.update({outcome.awaiting[0]: result})               # report to the awaited field
 
-    your_agent.guide(outcome.current_state, outcome.missing_fields)  # your job
+    your_agent.guide(outcome.current_state, outcome.blockers)       # your job
 ```
 
 The machine is the deterministic referee; your host owns everything stochastic or with side effects.
@@ -229,7 +233,9 @@ states:
         condition: { op: gte, field: budget, value: 1000 }
   - type: ACTION_EXECUTE
     title: Send confirmation
-    result_field: confirmation_sent
+    requires:
+      - field: confirmation_sent
+        type: boolean
     payload:
       to: { type: ref, field: email }        # a Ref
 transitions:
@@ -281,8 +287,31 @@ Requirement(
 ```
 
 A disallowed value won't complete the step and shows up as an `INVALID` blocker (not `MISSING`).
-`DataCollectionState.field_options()` returns each field's `description`, `options`, and any `pattern`
-so the agent can present the choices.
+`state.field_options()` returns each field's `required`, `type`, `description`, `options`, and any
+`pattern` so the agent can present the choices.
+
+### Optional fields, types & structured extraction
+
+Every `Requirement` has `required: bool = True` and `type: ValueType` (default `STRING`). An **optional**
+requirement (`required=False`) is collected if it appears but **never blocks** the step:
+
+```python
+Requirement(field="phone", description="if the customer shares it", required=False)
+```
+
+`state.to_pydantic_model()` turns a state's `requires` into a Pydantic model — hand its JSON Schema to
+your LLM as the structured-output spec, then validate the LLM's answer before it reaches the Blackboard.
+This works for **any** state type (`expected_fields()` / `to_pydantic_model()` live on the base):
+
+```python
+Model = session.current_state.to_pydantic_model()
+schema = Model.model_json_schema()          # required vs nullable, enums from options, patterns from Regex
+data   = Model.model_validate(raw)          # validate the extraction (raises on bad data)
+session.update(data.model_dump(exclude_none=True))
+```
+
+`type` maps to the schema: `STRING → string`, `INTEGER → integer`, `NUMBER → number`,
+`BOOLEAN → boolean`, `ARRAY → array`. `options` becomes an `enum`; a `Regex` condition becomes a `pattern`.
 
 ## 8b. Rendering to text for the LLM (`Renderable`)
 

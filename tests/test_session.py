@@ -129,7 +129,9 @@ def test_directive_is_ready_only_when_its_refs_resolve() -> None:
         initial="Send confirmation",
         states=[
             ActionExecuteState(
-                title="Send confirmation", result_field="sent", payload={"to": Ref(field="email")}
+                title="Send confirmation",
+                requires=[Requirement(field="sent")],
+                payload={"to": Ref(field="email")},
             )
         ],
     ).value
@@ -159,8 +161,8 @@ def test_a_cyclic_graph_settles_instead_of_looping() -> None:
         name="loop",
         initial="Step A",
         states=[
-            ActionExecuteState(title="Step A", result_field="ra"),
-            ActionExecuteState(title="Step B", result_field="rb"),
+            ActionExecuteState(title="Step A", requires=[Requirement(field="ra")]),
+            ActionExecuteState(title="Step B", requires=[Requirement(field="rb")]),
         ],
         transitions=[
             Transition(source_id="step-a", target_id="step-b"),
@@ -182,7 +184,9 @@ def test_data_for_future_states_is_kept_and_consumed_when_reached() -> None:
         states=[
             DataCollectionState(title="Collect email", requires=[Requirement(field="email")]),
             ActionExecuteState(
-                title="Send welcome", result_field="welcomed", payload={"to": Ref(field="email")}
+                title="Send welcome",
+                requires=[Requirement(field="welcomed")],
+                payload={"to": Ref(field="email")},
             ),
             DataCollectionState(title="Collect budget", requires=[Requirement(field="budget")]),
         ],

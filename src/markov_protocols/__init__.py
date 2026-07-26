@@ -26,7 +26,7 @@ from .conditions import (
 from .definition.blocker import Blocker, BlockReason
 from .definition.metadata import StateMetadata, TransitionMetadata
 from .definition.registry import state_registry
-from .definition.state import Directive, Option, Requirement, State, Status
+from .definition.state import Directive, Option, Requirement, State, Status, ValueType
 from .definition.states import ActionExecuteState, DataCollectionState, HumanHandoffState
 from .definition.transition import Transition
 from .definition.workflow import Workflow
@@ -95,6 +95,7 @@ __all__ = [
     "TransitionMetadata",
     "TransitionTaken",
     "UpdateResult",
+    "ValueType",
     "ValueChanged",
     "ValueSet",
     "Workflow",

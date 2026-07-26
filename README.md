@@ -27,7 +27,7 @@ Requires Python 3.13+.
 ```python
 from markov_protocols import (
     Workflow, DataCollectionState, ActionExecuteState,
-    Requirement, Ref, Transition, Session,
+    Requirement, ValueType, Ref, Transition, Session,
 )
 
 # 1. Define the workflow (plain data).
@@ -42,7 +42,7 @@ workflow = Workflow.compile(
         ActionExecuteState(
             title="Send confirmation",
             payload={"to": Ref(field="email")},   # a Ref, filled from collected data
-            result_field="confirmation_sent",
+            requires=[Requirement(field="confirmation_sent", type=ValueType.BOOLEAN)],  # its result
         ),
     ],
     transitions=[
@@ -78,7 +78,7 @@ while not session.is_finished:
     directive = outcome.directive
     if directive and directive.ready:                               # a side effect to run
         result = my_host.run(directive.payload)                     # your webhook / function
-        session.update({session.current_state.result_field: result})
+        session.update({outcome.awaiting[0]: result})              # report it to the awaited field
 ```
 
 ## Guidance & validation
@@ -145,7 +145,8 @@ transitions: []
 | Term | What it is |
 |---|---|
 | **Workflow** | the authored graph of states + transitions (`Workflow.compile()` validates it) |
-| **State** | a step — `DataCollectionState`, `ActionExecuteState`, `HumanHandoffState`, or your own |
+| **State** | a step — every state declares `requires: list[Requirement]`; types differ by *who fills them* |
+| **Requirement** | a field a state expects: `field`, `required` (default true), `type`, `options`, `condition` |
 | **Transition** | a directed link, optionally guarded by a `Condition` (branching) |
 | **Session** | one conversation's live run; drive it with `session.update(values)` |
 | **Blackboard** | the shared, deterministic record of collected values |

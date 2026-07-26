@@ -16,7 +16,7 @@ def _collect(title: str = "Collect Customer Data") -> DataCollectionState:
 
 
 def _action(title: str = "Send Confirmation") -> ActionExecuteState:
-    return ActionExecuteState(title=title, result_field="sent")
+    return ActionExecuteState(title=title, requires=[Requirement(field="sent")])
 
 
 def test_valid_graph_compiles_and_slugs_the_initial() -> None:
@@ -89,7 +89,9 @@ def test_workflow_round_trips_through_json_preserving_types() -> None:
         states=[
             _collect(),
             ActionExecuteState(
-                title="Send Confirmation", result_field="sent", payload={"to": Ref(field="email")}
+                title="Send Confirmation",
+                requires=[Requirement(field="sent")],
+                payload={"to": Ref(field="email")},
             ),
         ],
         transitions=[Transition(source_id="collect-customer-data", target_id="send-confirmation")],
