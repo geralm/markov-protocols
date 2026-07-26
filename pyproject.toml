@@ -1,6 +1,6 @@
 [project]
 name = "markov-protocols"
-version = "0.3.0"
+version = "0.4.0"
 description = "A deterministic finite state machine for modeling workflows that guide AI agents."
 readme = "README.md"
 requires-python = ">=3.13"

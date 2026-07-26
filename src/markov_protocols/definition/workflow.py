@@ -31,6 +31,9 @@ class Workflow(StrictModel, Renderable):
     states: tuple[SerializeAsAny[State], ...]
     transitions: tuple[Transition, ...] = ()
     initial_id: str
+    # Fields the host provides that no state collects (e.g. a pre-seeded id).
+    # Together with the states' requires, they form the workflow's field namespace.
+    external_fields: tuple[str, ...] = ()
 
     @field_validator("states", mode="before")
     @classmethod
@@ -38,6 +41,13 @@ class Workflow(StrictModel, Renderable):
         if isinstance(value, (list, tuple)):
             return tuple(state_registry.parse(v) for v in value)
         return value
+
+    @property
+    def fields(self) -> frozenset[str]:
+        """The workflow's field namespace: every field its states require, plus the
+        declared ``external_fields``. Derived — the system computes it."""
+        collected = {r.field for state in self.states for r in state.requires}
+        return frozenset(collected | set(self.external_fields))
 
     @classmethod
     def compile(
@@ -47,6 +57,7 @@ class Workflow(StrictModel, Renderable):
         states: Iterable[State | dict[str, Any]],
         initial: str,
         transitions: Iterable[Transition | dict[str, Any]] = (),
+        external_fields: Iterable[str] = (),
     ) -> Result[Workflow, str]:
         """Validate the graph and return a runnable ``Workflow`` (or a failure)."""
         parsed_states = tuple(state_registry.parse(s) for s in states)
@@ -80,12 +91,27 @@ class Workflow(StrictModel, Renderable):
         if initial_id not in by_id:
             return Result.fail(ErrorType.NOT_FOUND, f"unknown initial state: {initial!r}")
 
+        # Reference check: a state can only consume fields the workflow knows about
+        # (a field some state requires, or a declared external field). This catches
+        # a Ref to a typo'd or never-provided field before it deadlocks at runtime.
+        namespace = {r.field for state in parsed_states for r in state.requires}
+        namespace |= set(external_fields)
+        for state in parsed_states:
+            unknown = state.depends_on() - namespace
+            if unknown:
+                return Result.fail(
+                    ErrorType.NOT_FOUND,
+                    f"state {state.id!r} references unknown field(s) {sorted(unknown)}; "
+                    f"add them to a state's requires or to external_fields",
+                )
+
         return Result.ok(
             cls(
                 name=name,
                 states=parsed_states,
                 transitions=parsed_transitions,
                 initial_id=initial_id,
+                external_fields=tuple(sorted(set(external_fields))),
             )
         )
 

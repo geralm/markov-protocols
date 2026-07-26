@@ -106,6 +106,7 @@ states (handy when the user answers everything at once), or hold position when t
 | `directive` | the host action to run now (see below), or `None` |
 | `events` | what happened during this call |
 | `is_finished` | the workflow reached a terminal state |
+| `ignored_fields` | keys you sent that the workflow doesn't know — dropped, not stored (see §7c) |
 
 ### Blockers — why the step hasn't advanced
 
@@ -247,6 +248,40 @@ transitions:
 YAML support needs the optional extra: `pip install 'markov-protocols[yaml]'` (JSON needs
 nothing). To add another format, implement `IDocumentConverter` (methods `to_document` /
 `from_document`) and give it two facade functions — see `serialization/`.
+
+## 7c. The field namespace (references & Blackboard safety)
+
+A workflow knows a fixed set of fields: **every field its states `require`, plus any
+`external_fields` you declare** (host-provided values that no state collects). This namespace
+is derived — read it with `workflow.fields`.
+
+It does two things:
+
+- **Reference check at compile time.** A `Ref` to a field outside the namespace fails
+  `compile()` — so a typo'd or never-provided reference is caught before it deadlocks at runtime,
+  instead of silently sitting with `directive.ready == False` forever.
+- **Blackboard bounding at runtime.** `update()` stores only known keys; anything else is dropped
+  (so the Blackboard can't be flooded) and reported in `ignored_fields`.
+
+```python
+workflow = Workflow.compile(
+    name="intake",
+    initial="Send welcome",
+    external_fields=["customer_id"],          # provided by your host, not collected by a state
+    states=[
+        ActionExecuteState(
+            title="Send welcome",
+            payload={"to": Ref(field="customer_id")},   # OK: 'customer_id' is declared external
+            requires=[Requirement(field="welcomed")],
+        ),
+    ],
+)
+
+outcome = session.update({"welcomed": True, "junk": "x"}).value
+outcome.ignored_fields    # ["junk"] — dropped, never stored
+```
+
+If a `Ref` points at a field nothing declares, `compile()` returns a failed `Result` naming it.
 
 ## 8. Conditions & guards
 

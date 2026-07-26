@@ -52,6 +52,7 @@ class UpdateResult(Renderable):
     directive: Directive | None
     events: list[Event]
     is_finished: bool
+    ignored_fields: list[str]  # keys in this update that the workflow doesn't know
 
     @property
     def missing_fields(self) -> list[str]:
@@ -174,10 +175,19 @@ class Session:
     # --- execution -----------------------------------------------------
 
     def update(self, values: Mapping[str, Any]) -> Result[UpdateResult, str]:
-        """Apply new values, then settle the workflow forward as far as it can go."""
-        # Pass 1: record the incoming data. Each field that actually changed
+        """Apply new values, then settle the workflow forward as far as it can go.
+
+        Keys the workflow does not know about are dropped (never stored, so the
+        Blackboard can't be flooded) and reported back in ``ignored_fields``.
+        """
+        # Pass 0: bound the input to the workflow's field namespace.
+        known = self._workflow.fields
+        accepted = {field: value for field, value in values.items() if field in known}
+        ignored = sorted(field for field in values if field not in known)
+
+        # Pass 1: record the accepted values. Each field that actually changed
         # becomes one event (unchanged fields produce nothing).
-        events = list(self._blackboard.write(values))
+        events = list(self._blackboard.write(accepted))
 
         # Pass 2 (integrity): if a correction invalidated an already-completed
         # state, rewind to it before moving forward again.
@@ -188,7 +198,7 @@ class Session:
 
         # Everything that happened this call is appended to the permanent history.
         self._history.extend(events)
-        return Result.ok(self._snapshot(events))
+        return Result.ok(self._snapshot(events, ignored))
 
     def _fast_forward(self) -> list[Event]:
         """Step the cursor forward while the data allows, returning what happened.
@@ -341,7 +351,7 @@ class Session:
             return True
         return evaluate(transition.guard, self._blackboard)
 
-    def _snapshot(self, events: list[Event]) -> UpdateResult:
+    def _snapshot(self, events: list[Event], ignored: list[str]) -> UpdateResult:
         """Assemble the return value describing where the session now stands."""
         current = self.current_state
         return UpdateResult(
@@ -351,4 +361,5 @@ class Session:
             directive=current.directive(self._blackboard),
             events=events,
             is_finished=self.is_finished,
+            ignored_fields=ignored,
         )

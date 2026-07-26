@@ -127,6 +127,7 @@ def test_directive_is_ready_only_when_its_refs_resolve() -> None:
     workflow = Workflow.compile(
         name="notify",
         initial="Send confirmation",
+        external_fields=["email"],
         states=[
             ActionExecuteState(
                 title="Send confirmation",

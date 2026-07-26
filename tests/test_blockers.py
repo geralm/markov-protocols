@@ -83,7 +83,9 @@ def test_action_state_awaits_its_result_while_the_directive_tracks_inputs() -> N
     state = ActionExecuteState(
         title="Send", requires=[Requirement(field="sent")], payload={"to": Ref(field="email")}
     )
-    workflow = Workflow.compile(name="a", initial="Send", states=[state]).value
+    workflow = Workflow.compile(
+        name="a", initial="Send", states=[state], external_fields=["email"]
+    ).value
     session = _single(workflow)
 
     # The state always awaits its own result; the directive reports it can't run

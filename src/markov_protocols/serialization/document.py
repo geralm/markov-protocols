@@ -39,12 +39,15 @@ def export_to_dict(workflow: Workflow) -> dict[str, Any]:
     dumped = workflow.model_dump(mode="json")
     # Present the friendly, compile-compatible shape: `initial` (not `initial_id`),
     # and a stable key order that reads well when written to a file.
-    return {
+    document: dict[str, Any] = {
         "name": dumped["name"],
         "initial": dumped["initial_id"],
         "states": dumped["states"],
         "transitions": dumped["transitions"],
     }
+    if dumped["external_fields"]:
+        document["external_fields"] = dumped["external_fields"]
+    return document
 
 
 def import_from_dict(document: Mapping[str, Any]) -> Result[Workflow, str]:
@@ -63,6 +66,7 @@ def import_from_dict(document: Mapping[str, Any]) -> Result[Workflow, str]:
             initial=document["initial"],
             states=document.get("states", []),
             transitions=document.get("transitions", []),
+            external_fields=document.get("external_fields", []),
         )
     except (ValueError, ValidationError) as error:
         # Turn construction problems (unknown state type, bad field) into a clean

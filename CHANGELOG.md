@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.0
+
+Adds a workflow **field namespace** — reference validation and Blackboard bounding.
+
+### Added
+- **`Workflow.external_fields`** — declare fields the host provides that no state
+  collects (e.g. a pre-seeded id). Together with every state's `requires`, they form
+  the workflow's field namespace, exposed (derived) as **`Workflow.fields`**.
+- **Compile-time reference check** — a `Ref` to a field outside the namespace now
+  fails `compile()` with a clear message, instead of deadlocking at runtime.
+- **Blackboard bounding** — `Session.update()` stores only known fields; unknown keys
+  are dropped (so the Blackboard can't be flooded) and reported in the new
+  **`UpdateResult.ignored_fields`**.
+
+### Notes
+- No ordering ("used before collected") check: a field may legitimately be volunteered
+  early, so that would false-positive. Runtime already reports a genuinely missing
+  reference via `directive.ready == False` / `directive.missing`.
+- Migration: if a workflow `Ref`s a host-provided field that no state collects, add it
+  to `external_fields`.
+
 ## 0.3.0
 
 Unifies how every state declares the fields it waits on, and adds optional
