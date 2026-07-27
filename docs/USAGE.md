@@ -283,6 +283,30 @@ outcome.ignored_fields    # ["junk"] — dropped, never stored
 
 If a `Ref` points at a field nothing declares, `compile()` returns a failed `Result` naming it.
 
+## 7d. Visualize (Mermaid / ASCII)
+
+Render a compiled workflow as a flowchart — states (title + type), transitions, and the guard on
+each branch. `export_graph(workflow)` gives Mermaid; `"ascii"` gives an indented outline.
+
+```python
+from markov_protocols import export_graph, to_mermaid, to_ascii
+
+print(export_graph(workflow))            # Mermaid flowchart TD (default)
+print(export_graph(workflow, "ascii"))   # indented text outline
+```
+
+```
+flowchart TD
+    __start__([Start]) --> detect_intent
+    detect_intent["Detect intent<br/><i>DATA_COLLECTION</i>"]
+    ...
+    detect_intent -->|"intent == buy"| sales
+    detect_intent -->|"intent == support"| support
+```
+
+Guard labels come from the condition rendering itself (`condition.to_llm_extended()`), so a guard
+reads identically in a prompt, in `workflow.to_llm_extended()`, and in the diagram.
+
 ## 8. Conditions & guards
 
 Conditions are a small, typed, JSON-serializable vocabulary evaluated over the Blackboard. Use them

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0
+
+Adds workflow visualization, and makes conditions render themselves.
+
+### Added
+- **`export_graph(workflow, format="mermaid")`** (plus `to_mermaid` / `to_ascii`) —
+  a flowchart of the compiled workflow: each state's title + type, the transitions,
+  and the guard on each branch. Mermaid (LangGraph-style) or an ASCII outline.
+- **`Condition` now implements `Renderable`** — every condition renders itself
+  (`to_llm_extended` / `to_markdown`, e.g. `"intent == buy"`). This removes the
+  type-switch that would otherwise live in the visualizer, and lets guards be
+  printed in prompts too.
+
+### Changed
+- `Workflow.to_llm_extended()` now shows the actual guard condition on a
+  transition (e.g. `[intent == buy]`) instead of a generic `(conditional)`.
+
 ## 0.4.0
 
 Adds a workflow **field namespace** — reference validation and Blackboard bounding.

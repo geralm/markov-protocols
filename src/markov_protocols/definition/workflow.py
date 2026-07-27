@@ -143,4 +143,6 @@ class Workflow(StrictModel, Renderable):
         source_title = source.title if source else transition.source_id
         target_title = target.title if target else transition.target_id
         text = f"{source_title} -> {target_title}"
-        return f"{text} (conditional)" if transition.guard is not None else text
+        if transition.guard is not None:
+            text += f" [{transition.guard.to_llm_extended()}]"
+        return text
